@@ -1,2 +1,2 @@
 # YML-Samples
-Sample templates to get base pipelines on
+Sample templates to base pipelines from
