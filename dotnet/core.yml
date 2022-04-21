@@ -1,0 +1,68 @@
+name: 1.0.0$(rev:.r)
+# Run it on all check-ins, and if the user wants to filter, they can
+#trigger:
+#- main
+
+pool:
+  vmImage: 'windows-latest'
+
+  variables:
+    Solution: '**/*.sln'
+    Project: '**/OCOS.vbproj'
+    BuildPlatform: 'Any CPU'
+
+variables:
+  Solution: '**/*.sln'
+  Project: '**/OCOS.vbproj'
+  RuntimeVersion: 6
+
+steps:
+  - task: UseDotNet@2
+    displayName: "Use DotNet $(RuntimeVersion).x SDK"
+    inputs:
+      packageType: 'sdk'
+      version: '$(RuntimeVersion).x'
+
+  - task: DotNetCoreCLI@2
+    displayName: "dotnet publish $(Project)"
+    inputs:
+      command: 'publish'
+      publishWebProjects: false
+      projects: $(Project)
+      arguments: '--configuration Release --output $(Build.ArtifactStagingDirectory) -p:DebugType=None -p:Version=$(Build.BuildNumber) -p:AssemblyVersion=$(Build.BuildNumber) -p:FileVersion=$(Build.BuildNumber) -nowarn:NU1701'
+
+  - task: DotNetCoreCLI@2
+    displayName: "dotnet test $(Solution)"
+    inputs:
+        command: 'test'
+        projects: $(Solution)
+        arguments: '--configuration Release --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover,cobertura'
+        testRunTitle: '$(Build.DefinitionName)-$(Build.SourceBranchName)'
+
+  - task: DotNetCoreCLI@2
+    displayName: Install ReportGenerator
+    inputs:
+        command: custom
+        custom: tool
+        arguments: update --tool-path . dotnet-reportgenerator-globaltool
+
+  - script: |
+        mkdir .\reports
+        .\reportgenerator.exe -reports:$(Agent.TempDirectory)\**\coverage.cobertura.xml -targetdir:reports -reporttypes:"HTMLInline;HTMLChart"
+        .\reportgenerator.exe -reports:$(Agent.TempDirectory)\**\coverage.cobertura.xml -targetdir:reports -reporttypes:"cobertura"
+        dir .\reports
+    displayName: Create coverage reports in html format to be displayed in AzureDevops and in XML format to be used for summary
+
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage to AzureDevOps'
+    inputs:
+        codeCoverageTool: Cobertura
+        summaryFilelocation: '$(System.DefaultWorkingDirectory)\reports\Cobertura.xml'
+        reportDirectory: '$(System.DefaultWorkingDirectory)\reports'
+
+  - task: PublishBuildArtifacts@1
+    displayName: "Publish build artifacts for $(Project)"
+    inputs:
+      PathtoPublish: $(Build.ArtifactStagingDirectory)
+      ArtifactName: drop
+      publishLocation: Container

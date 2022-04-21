@@ -1,0 +1,83 @@
+name: 10.0.0$(rev:.r)
+# Run it on all check-ins, and if the user wants to filter, they can
+#trigger:
+#- main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  Solution: '**/*.sln'
+  Project: '**/OCOS.vbproj'
+  BuildPlatform: 'Any CPU'
+
+steps:
+- task: NuGetToolInstaller@1
+  displayName: NuGet Tool Installer
+  inputs:
+    versionSpec: '5'
+
+- task: NuGetCommand@2
+  displayName: NuGet Restore $(Solution)
+  inputs:
+    restoreSolution: '$(Solution)'
+
+- task: MSBuild@1
+  displayName: Build $(Solution)
+  inputs:
+    Solution: '$(Solution)'
+    msbuildArchitecture: 'x64'
+    platform: '$(BuildPlatform)'
+    configuration: 'Release'
+    maximumCpuCount: true
+
+- task: VisualStudioTestPlatformInstaller@1
+  displayName: 'Visual Studio Test Platform Installer'
+  inputs:
+    packageFeedSelector: nugetOrg
+    versionSelector: specificVersion
+    testPlatformVersion: '16.x'
+
+# Use the dotnet core SDK because I don't know how else to install report generator :-)
+- task: UseDotNet@2
+  displayName: "Use DotNet 3.x SDK"
+  inputs:
+    packageType: 'sdk'
+    version: '3.x'
+
+- task: VSTest@2
+  displayName: Run Unit Tests (No UI Tests)
+  inputs:
+    testSelector: 'testAssemblies'
+    testAssemblyVer2: |
+      **\*test*.dll
+      !**\*TestAdapter.dll
+      !**\obj\**
+    searchFolder: '$(System.DefaultWorkingDirectory)'
+    uiTests: false
+    distributionBatchType: 'basedOnAssembly'
+    platform: '$(BuildPlatform)'
+    configuration: 'Release'
+    otherConsoleOptions: '/collect:"Code Coverage;Format=Cobertura"'
+
+    # It could be the "install" or update command. Don't know in this particular environment.
+- task: DotNetCoreCLI@2
+  displayName: Install ReportGenerator
+  inputs:
+      command: custom
+      custom: tool
+      arguments: install --tool-path . dotnet-reportgenerator-globaltool
+
+- script: |
+      mkdir .\reports
+      .\reportgenerator.exe -reports:$(Agent.TempDirectory)\**\coverage.cobertura.xml -targetdir:reports -reporttypes:"HTMLInline;HTMLChart"
+      .\reportgenerator.exe -reports:$(Agent.TempDirectory)\**\coverage.cobertura.xml -targetdir:reports -reporttypes:"cobertura"
+      dir .\reports
+  displayName: Create coverage reports in html format to be displayed in AzureDevops and in XML format to be used for summary
+
+- task: PublishCodeCoverageResults@1
+  displayName: 'Publish code coverage to AzureDevOps'
+  inputs:
+      codeCoverageTool: Cobertura
+      summaryFilelocation: '$(system.defaultworkingdirectory)\reports\Cobertura.xml'
+      reportDirectory: '$(system.defaultworkingdirectory)\reports'
